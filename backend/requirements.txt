@@ -1,0 +1,23 @@
+# Full backend runtime + dev/test dependencies.
+# For the minimal offline-only set (no vendor SDKs), see requirements-min.txt.
+
+# --- Web / API ---
+fastapi>=0.110
+uvicorn[standard]>=0.27
+pydantic>=2.5
+pydantic-settings>=2.1
+python-multipart>=0.0.9
+
+# --- Numerics (RAG cosine store fast path) ---
+numpy>=1.24
+
+# --- LLM backends ---
+anthropic>=0.40          # primary: Claude (streaming)
+httpx>=0.27              # HuggingFace Inference API + TestClient transport
+
+# --- Optional, guarded at runtime ---
+# sentence-transformers>=2.2   # uncomment for real embeddings (heavy)
+
+# --- Test / lint ---
+pytest>=8.0
+ruff>=0.5

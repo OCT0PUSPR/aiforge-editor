@@ -1,0 +1,30 @@
+# aiforge-editor — backend (FastAPI) + frontend (nginx-served SPA).
+#
+#   docker compose up --build
+#
+# The frontend is served on http://localhost:8080 and proxies /api + /health to
+# the backend. By default the backend runs the OFFLINE mock LLM — no keys
+# needed. To use Claude, set AIFORGE_BACKEND=anthropic and ANTHROPIC_API_KEY in
+# a .env file alongside this compose file.
+services:
+  backend:
+    build:
+      context: ./backend
+    environment:
+      AIFORGE_BACKEND: ${AIFORGE_BACKEND:-mock}
+      AIFORGE_WORKSPACE_ROOT: /workspace
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      HF_TOKEN: ${HF_TOKEN:-}
+    volumes:
+      # Mount a project to edit. Point this at your own codebase.
+      - ./backend/tests/sample_project:/workspace
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build:
+      context: ./frontend
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
