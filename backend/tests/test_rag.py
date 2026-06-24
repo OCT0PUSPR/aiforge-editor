@@ -1,4 +1,5 @@
 """RAG indexer, hashing embedder, and search tests."""
+
 from aiforge.rag.indexer import HashingEmbedder, RagIndexer, chunk_code
 from aiforge.workspace.files import Workspace
 

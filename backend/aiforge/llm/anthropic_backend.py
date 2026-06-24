@@ -10,6 +10,7 @@ feature via configuration if desired.
 The import of ``anthropic`` is deferred to construction time so the rest of the
 app (and the offline test suite) loads even when the SDK is not installed.
 """
+
 from __future__ import annotations
 
 import os
@@ -32,8 +33,10 @@ class AnthropicBackend:
         *,
         api_key: Optional[str] = None,
         model: str = DEFAULT_MODEL,
+        timeout: float = 60.0,
     ) -> None:
         self.model = model
+        self.timeout = timeout
         self._api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
         self._client = None  # lazily constructed in complete()
 
@@ -51,7 +54,7 @@ class AnthropicBackend:
             raise RuntimeError(
                 "ANTHROPIC_API_KEY is not set. Export it or use AIFORGE_BACKEND=mock."
             )
-        self._client = Anthropic(api_key=self._api_key)
+        self._client = Anthropic(api_key=self._api_key, timeout=self.timeout)
         return self._client
 
     @staticmethod

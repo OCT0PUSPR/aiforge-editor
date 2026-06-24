@@ -1,10 +1,10 @@
 /**
  * Monaco-based editor pane with tabs, save-on-Ctrl/Cmd+S, and a real inline AI
- * completion provider that calls `/api/complete` with the prefix/suffix around
- * the cursor (fill-in-the-middle).
+ * completion provider that calls the workspace-scoped /ai/complete endpoint
+ * with the prefix/suffix around the cursor (fill-in-the-middle).
  */
 import Editor, { type Monaco, type OnMount } from "@monaco-editor/react";
-import type { editor, IDisposable } from "monaco-editor";
+import type { editor, IDisposable, Position } from "monaco-editor";
 import { useCallback, useRef } from "react";
 import { useStore } from "../store";
 import { languageForPath } from "../language";
@@ -50,36 +50,31 @@ export function EditorPane() {
 
   const handleMount: OnMount = useCallback(
     (editorInstance: editor.IStandaloneCodeEditor, monaco: Monaco) => {
-      // Ctrl/Cmd+S saves the active file (and prevents the browser dialog).
-      editorInstance.addCommand(
-        monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS,
-        () => {
-          void saveActive();
-        },
-      );
+      editorInstance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+        void saveActive();
+      });
 
-      // Register an inline-completion provider that asks the backend for a
-      // fill-in-the-middle continuation around the cursor. Registered once.
       if (!completionDisposable.current) {
         completionDisposable.current = monaco.languages.registerInlineCompletionsProvider(
           { pattern: "**" },
           {
-            async provideInlineCompletions(model, position) {
+            async provideInlineCompletions(model: editor.ITextModel, position: Position) {
+              const state = useStore.getState();
+              if (!state.settings.completionEnabled || !state.activeWorkspace) {
+                return { items: [] };
+              }
               const offset = model.getOffsetAt(position);
               const full = model.getValue();
               const prefix = full.slice(0, offset);
               const suffix = full.slice(offset);
-              // Skip trivial contexts to avoid noisy requests.
-              if (prefix.trim().length === 0) {
-                return { items: [] };
-              }
+              if (prefix.trim().length === 0) return { items: [] };
               try {
-                const text = await completeOnce({
+                const text = await completeOnce(state.activeWorkspace.id, {
                   prefix,
                   suffix,
                   language: model.getLanguageId(),
-                  path: useStore.getState().activePath ?? "",
-                  max_tokens: 128,
+                  path: state.activePath ?? "",
+                  max_tokens: 96,
                 });
                 if (!text) return { items: [] };
                 return {
@@ -100,7 +95,7 @@ export function EditorPane() {
               }
             },
             freeInlineCompletions() {
-              /* nothing to dispose per-result */
+              /* nothing per-result */
             },
           },
         );
@@ -116,8 +111,8 @@ export function EditorPane() {
           <h2>aiforge</h2>
           <p>Open a file from the explorer to start editing.</p>
           <p className="hint">
-            Press <kbd>Cmd/Ctrl</kbd>+<kbd>K</kbd> to issue an AI edit · type to
-            get inline AI completions.
+            <kbd>Cmd/Ctrl</kbd>+<kbd>K</kbd> AI edit · <kbd>Cmd/Ctrl</kbd>+
+            <kbd>Shift</kbd>+<kbd>P</kbd> commands · type for inline completion
           </p>
         </div>
       </div>

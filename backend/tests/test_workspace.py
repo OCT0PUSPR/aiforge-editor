@@ -1,4 +1,5 @@
 """Workspace sandbox + path-traversal protection tests."""
+
 import pytest
 
 from aiforge.workspace.files import (

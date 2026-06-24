@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aiforge-frontend
+  labels: { app: aiforge, component: frontend }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: aiforge, component: frontend }
+  template:
+    metadata:
+      labels: { app: aiforge, component: frontend }
+    spec:
+      containers:
+        - name: frontend
+          image: aiforge-frontend:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
+          resources:
+            requests: { cpu: "50m", memory: "64Mi" }
+            limits: { cpu: "250m", memory: "128Mi" }
+          readinessProbe:
+            httpGet: { path: /, port: 80 }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: aiforge-frontend
+  labels: { app: aiforge, component: frontend }
+spec:
+  selector: { app: aiforge, component: frontend }
+  ports:
+    - port: 80
+      targetPort: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: aiforge
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-buffering: "off" # SSE streaming
+spec:
+  rules:
+    - host: aiforge.local
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service: { name: aiforge-backend, port: { number: 8000 } }
+          - path: /health
+            pathType: Prefix
+            backend:
+              service: { name: aiforge-backend, port: { number: 8000 } }
+          - path: /
+            pathType: Prefix
+            backend:
+              service: { name: aiforge-frontend, port: { number: 80 } }

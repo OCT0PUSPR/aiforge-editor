@@ -5,6 +5,7 @@ RAG index) plus the currently open file, assembling them into a system prompt,
 and streaming the model's answer. Returns the retrieved references alongside the
 stream so the UI can render "jump to source" links.
 """
+
 from __future__ import annotations
 
 from typing import Iterator, List, Optional, Tuple
@@ -36,9 +37,7 @@ def build_context(
         for r in results:
             c = r.chunk
             sym = f" ({c.symbol})" if c.symbol else ""
-            parts.append(
-                f"## {c.path}:{c.start_line}-{c.end_line}{sym}\n```\n{c.text}\n```"
-            )
+            parts.append(f"## {c.path}:{c.start_line}-{c.end_line}{sym}\n```\n{c.text}\n```")
     return "\n\n".join(parts) if parts else "(no code context available)"
 
 
@@ -63,7 +62,7 @@ def chat(
     system = f"{_SYSTEM}\n\n{context}"
 
     messages: List[Message] = []
-    for role, content in (history or []):
+    for role, content in history or []:
         if role in ("user", "assistant"):
             messages.append(Message(role=role, content=content))
     messages.append(Message(role="user", content=question))

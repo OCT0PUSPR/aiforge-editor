@@ -15,6 +15,7 @@ Design notes:
   testing (apply then un-apply) straightforward and is genuinely useful for an
   "undo" feature.
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -65,7 +66,7 @@ def _strip_prefix(path: str) -> str:
         return path
     for prefix in ("a/", "b/"):
         if path.startswith(prefix):
-            return path[len(prefix):]
+            return path[len(prefix) :]
     return path
 
 
@@ -210,18 +211,17 @@ def _apply_hunk(lines: List[str], hunk: Hunk) -> List[str]:
     # Preferred position: declared old_start (converted to 0-based).
     pos = hunk.old_start - 1
     if not _matches(lines, pos, old_block):
-        pos = _relocate(lines, pos, old_block)
-        if pos is None:
-            raise DiffError(
-                f"hunk does not apply; context mismatch near line {hunk.old_start}"
-            )
-    return lines[:pos] + new_block + lines[pos + len(old_block):]
+        relocated = _relocate(lines, pos, old_block)
+        if relocated is None:
+            raise DiffError(f"hunk does not apply; context mismatch near line {hunk.old_start}")
+        pos = relocated
+    return lines[:pos] + new_block + lines[pos + len(old_block) :]
 
 
 def _matches(lines: List[str], pos: int, block: List[str]) -> bool:
     if pos < 0 or pos + len(block) > len(lines):
         return False
-    return lines[pos:pos + len(block)] == block
+    return lines[pos : pos + len(block)] == block
 
 
 def _relocate(lines: List[str], guess: int, block: List[str], window: int = 50) -> Optional[int]:
@@ -265,8 +265,7 @@ def reverse_diff(diff_text: str) -> str:
                 else:
                     rev_lines.append(ln)
             out.append(
-                f"@@ -{hunk.new_start},{hunk.new_count} "
-                f"+{hunk.old_start},{hunk.old_count} @@"
+                f"@@ -{hunk.new_start},{hunk.new_count} +{hunk.old_start},{hunk.old_count} @@"
             )
             out.extend(rev_lines)
     return "\n".join(out) + "\n"
@@ -295,3 +294,48 @@ def make_unified_diff(path: str, old: str, new: str, *, context: int = 3) -> str
         lineterm="",
     )
     return "\n".join(diff) + "\n"
+
+
+# --------------------------------------------------------------------------
+# Multi-file
+# --------------------------------------------------------------------------
+class DiffConflict(DiffError):
+    """Raised when a multi-file apply would conflict (e.g. stale base)."""
+
+
+def make_multifile_diff(files: "List[tuple[str, str, str]]", *, context: int = 3) -> str:
+    """Combine per-file ``(path, old, new)`` triples into one unified diff."""
+    parts: List[str] = []
+    for path, old, new in files:
+        if old == new:
+            continue
+        parts.append(make_unified_diff(path, old, new, context=context).rstrip("\n"))
+    return ("\n".join(parts) + "\n") if parts else ""
+
+
+def apply_multifile(sources: "dict[str, str]", diff_text: str) -> "dict[str, str]":
+    """Apply a multi-file unified diff to a ``{path: content}`` mapping.
+
+    ``sources`` provides the current content for each touched path (use ``""``
+    for a file being created). Returns a new mapping of ``{path: new_content}``
+    for every path the diff modifies. Raises :class:`DiffConflict` if a hunk's
+    context can't be located even with fuzzy relocation.
+    """
+    patches = parse_unified_diff(diff_text)
+    results: "dict[str, str]" = {}
+    for patch in patches:
+        path = patch.target_path()
+        if patch.is_deletion:
+            results[path] = ""
+            continue
+        original = sources.get(path, "")
+        try:
+            results[path] = apply_patch(original, patch)
+        except DiffError as exc:
+            raise DiffConflict(f"{path}: {exc}") from exc
+    return results
+
+
+def reverse_multifile_diff(diff_text: str) -> str:
+    """Reverse a multi-file diff (delegates to :func:`reverse_diff`)."""
+    return reverse_diff(diff_text)

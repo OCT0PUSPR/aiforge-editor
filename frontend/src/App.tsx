@@ -1,31 +1,51 @@
 /**
- * Top-level layout: VS-Code-like shell with a file-tree sidebar, the editor in
- * the centre, an AI chat panel on the right, a command bar (Cmd/Ctrl+K), a diff
- * preview modal, and a status bar.
+ * Top-level app: gates on auth, then renders the VS-Code-like shell (top bar,
+ * file tree, editor, chat, status bar) plus the command bar, command palette,
+ * diff modal, settings, and toasts.
  */
 import { useEffect } from "react";
 import { FileTree } from "./components/FileTree";
 import { EditorPane } from "./components/EditorPane";
 import { ChatPanel } from "./components/ChatPanel";
 import { CommandBar } from "./components/CommandBar";
+import { CommandPalette } from "./components/CommandPalette";
 import { DiffModal } from "./components/DiffModal";
 import { StatusBar } from "./components/StatusBar";
+import { TopBar } from "./components/TopBar";
+import { SettingsModal } from "./components/Settings";
+import { Toasts } from "./components/Toasts";
+import { Login } from "./components/Login";
 import { useStore } from "./store";
 
 export default function App() {
-  const buildIndex = useStore((s) => s.buildIndex);
+  const status = useStore((s) => s.status);
+  const bootstrap = useStore((s) => s.bootstrap);
 
-  // Build the RAG index once on startup so chat has context immediately.
   useEffect(() => {
-    void buildIndex();
-  }, [buildIndex]);
+    void bootstrap();
+  }, [bootstrap]);
+
+  if (status === "init") {
+    return (
+      <div className="loading-screen">
+        <div className="loading-logo">✦ aiforge</div>
+        <div className="spinner" />
+      </div>
+    );
+  }
+
+  if (status === "unauthenticated") {
+    return (
+      <>
+        <Login />
+        <Toasts />
+      </>
+    );
+  }
 
   return (
     <div className="app">
-      <header className="titlebar">
-        <span className="logo">✦ aiforge</span>
-        <span className="subtitle">AI-native code editor</span>
-      </header>
+      <TopBar />
       <div className="main">
         <FileTree />
         <EditorPane />
@@ -33,7 +53,10 @@ export default function App() {
       </div>
       <StatusBar />
       <CommandBar />
+      <CommandPalette />
       <DiffModal />
+      <SettingsModal />
+      <Toasts />
     </div>
   );
 }

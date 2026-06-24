@@ -1,7 +1,6 @@
 /**
- * Right-sidebar chat panel. Asks the backend about the codebase, streams the
- * answer via SSE, renders code blocks, shows retrieved references, and offers
- * an "apply code to file" action for fenced code blocks.
+ * Right-sidebar chat panel. Streams workspace-scoped answers via SSE, renders
+ * code blocks + retrieved references, and offers "apply to file".
  */
 import { useRef, useState } from "react";
 import { streamChat, type ChatTurn, type SearchResult } from "../api/client";
@@ -12,14 +11,12 @@ interface Message {
   content: string;
   references?: SearchResult[];
 }
-
 interface Segment {
   type: "text" | "code";
   content: string;
   lang?: string;
 }
 
-/** Split assistant text into prose and fenced code blocks. */
 function segmentize(text: string): Segment[] {
   const segments: Segment[] = [];
   const re = /```(\w*)\n([\s\S]*?)```/g;
@@ -34,18 +31,28 @@ function segmentize(text: string): Segment[] {
   return segments;
 }
 
+function ReferenceLink({ reference }: { reference: SearchResult }) {
+  const openFile = useStore((s) => s.openFile);
+  return (
+    <button className="ref-link" onClick={() => void openFile(reference.path)}>
+      {reference.path}:{reference.start_line}-{reference.end_line}
+      {reference.symbol ? ` (${reference.symbol})` : ""}
+    </button>
+  );
+}
+
 function AssistantBody({ message }: { message: Message }) {
   const activeTab = useStore((s) => s.activeTab());
   const updateContent = useStore((s) => s.updateContent);
-  const setStatus = useStore((s) => s.setStatus);
+  const toast = useStore((s) => s.toast);
 
   const applyToFile = (code: string) => {
     if (!activeTab) {
-      setStatus("open a file before applying code");
+      toast("error", "Open a file before applying code");
       return;
     }
     updateContent(activeTab.path, code);
-    setStatus(`inserted code into ${activeTab.path} (unsaved)`);
+    toast("info", `Inserted code into ${activeTab.path} (unsaved)`);
   };
 
   return (
@@ -77,26 +84,20 @@ function AssistantBody({ message }: { message: Message }) {
   );
 }
 
-function ReferenceLink({ reference }: { reference: SearchResult }) {
-  const openFile = useStore((s) => s.openFile);
-  return (
-    <button className="ref-link" onClick={() => openFile(reference.path)}>
-      {reference.path}:{reference.start_line}-{reference.end_line}
-      {reference.symbol ? ` (${reference.symbol})` : ""}
-    </button>
-  );
-}
-
 export function ChatPanel() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const activeTab = useStore((s) => s.activeTab());
+  const workspace = useStore((s) => s.activeWorkspace);
+  const topK = useStore((s) => s.settings.topK);
   const abortRef = useRef<AbortController | null>(null);
+
+  const stop = () => abortRef.current?.abort();
 
   const send = async () => {
     const question = input.trim();
-    if (!question || streaming) return;
+    if (!question || streaming || !workspace) return;
     setInput("");
     const history: ChatTurn[] = messages.map((m) => ({ role: m.role, content: m.content }));
     setMessages((prev) => [
@@ -109,22 +110,22 @@ export function ChatPanel() {
     abortRef.current = controller;
 
     await streamChat(
+      workspace.id,
       {
         question,
         open_path: activeTab?.path ?? "",
         open_content: activeTab?.content ?? "",
         history,
-        top_k: 6,
+        top_k: topK,
       },
       {
-        onToken: (text) => {
+        onToken: (text) =>
           setMessages((prev) => {
             const next = [...prev];
             const last = next[next.length - 1];
             next[next.length - 1] = { ...last, content: last.content + text };
             return next;
-          });
-        },
+          }),
         onMeta: (data) => {
           const refs = (data.references as SearchResult[]) ?? [];
           setMessages((prev) => {
@@ -134,14 +135,13 @@ export function ChatPanel() {
             return next;
           });
         },
-        onError: (msg) => {
+        onError: (msg) =>
           setMessages((prev) => {
             const next = [...prev];
             const last = next[next.length - 1];
             next[next.length - 1] = { ...last, content: last.content + `\n\n[error: ${msg}]` };
             return next;
-          });
-        },
+          }),
         onDone: () => setStreaming(false),
       },
       controller.signal,
@@ -182,9 +182,11 @@ export function ChatPanel() {
             }
           }}
         />
-        <button disabled={streaming} onClick={() => void send()}>
-          {streaming ? "…" : "Send"}
-        </button>
+        {streaming ? (
+          <button onClick={stop}>Stop</button>
+        ) : (
+          <button onClick={() => void send()}>Send</button>
+        )}
       </div>
     </aside>
   );

@@ -1,312 +1,130 @@
-"""FastAPI application exposing the aiforge AI editor backend.
+"""FastAPI application factory for the aiforge editor backend.
 
-Endpoints
----------
-- ``GET  /health``           liveness + backend/index status
-- ``GET  /api/tree``         workspace file tree
-- ``GET  /api/file``         read a file (``?path=``)
-- ``PUT  /api/file``         save a file
-- ``POST /api/file``         create a file
-- ``DELETE /api/file``       delete a file (``?path=``)
-- ``POST /api/complete``     inline completion (SSE stream)
-- ``POST /api/chat``         codebase chat (SSE stream, with references)
-- ``POST /api/edit``         propose an agentic edit (returns a diff)
-- ``POST /api/edit/apply``   apply a proposed diff to the workspace
-- ``POST /api/index``        (re)build the RAG index
-- ``GET  /api/search``       RAG search (``?q=&k=``)
+Wires together: structured logging, the services container, DB init, CORS, the
+security/observability middleware, all routers (auth, workspaces, files, rag,
+ai), global error handlers, ``/health``, ``/ready``, ``/metrics``, and
+(optionally) serving the built frontend in production.
 
-The SSE contract is a stream of ``event:``/``data:`` lines; data is JSON. The
-frontend ``client.ts`` parses the same shape. The dev frontend origin is
-allowed via CORS; in production the built frontend is served from ``/``.
+The app is fully multi-tenant: every workspace is sandboxed to its own
+filesystem root and owned by an authenticated user.
 """
+
 from __future__ import annotations
 
-import json
-from typing import Iterator, List, Optional
+import contextlib
+from typing import Optional
 
-try:
-    from fastapi import FastAPI, HTTPException, Query
-    from fastapi.middleware.cors import CORSMiddleware
-    from fastapi.responses import JSONResponse, StreamingResponse
-    from pydantic import BaseModel
-except ImportError as exc:  # pragma: no cover - server requires fastapi
-    raise RuntimeError(
-        "FastAPI is required to run the server. Install backend requirements."
-    ) from exc
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, PlainTextResponse, Response
+from sqlalchemy import text
 
-from ..ai import chat as chat_feature
-from ..ai import completion as completion_feature
-from ..ai.diff import DiffError
-from ..ai.edit import apply_edit, apply_full_content, propose_edit
 from ..config import Settings, get_settings
-from ..llm import get_backend
-from ..rag.indexer import RagIndexer
-from ..workspace.files import (
-    NotFoundError,
-    PathTraversalError,
-    Workspace,
-    WorkspaceError,
-)
+from ..db import get_engine, init_db
+from ..observability import configure_logging, get_logger, metrics
+from ..workspace import WorkspaceError
+from .middleware import BodySizeLimitMiddleware, RequestContextMiddleware
+from .routers import ai, auth, files, rag, workspaces
+from .services import Services
+
+log = get_logger("aiforge.server")
 
 
-# --------------------------------------------------------------------------
-# Request models
-# --------------------------------------------------------------------------
-class FileSave(BaseModel):
-    path: str
-    content: str
+@contextlib.asynccontextmanager
+async def _lifespan(app: FastAPI):
+    settings: Settings = app.state.settings
+    log.info("startup", backend=settings.backend, db=settings.database_url.split("://")[0])
+    init_db()
+    app.state.ready = True
+    try:
+        yield
+    finally:
+        # Graceful shutdown: dispose DB connections.
+        app.state.ready = False
+        with contextlib.suppress(Exception):
+            get_engine().dispose()
+        log.info("shutdown")
 
 
-class FileCreate(BaseModel):
-    path: str
-    content: str = ""
-
-
-class CompleteRequest(BaseModel):
-    prefix: str
-    suffix: str = ""
-    language: str = ""
-    path: str = ""
-    max_tokens: int = 256
-
-
-class ChatTurn(BaseModel):
-    role: str
-    content: str
-
-
-class ChatRequest(BaseModel):
-    question: str
-    open_path: str = ""
-    open_content: str = ""
-    history: List[ChatTurn] = []
-    top_k: int = 6
-
-
-class EditRequest(BaseModel):
-    path: str
-    instruction: str
-
-
-class EditApplyRequest(BaseModel):
-    path: str
-    diff: Optional[str] = None
-    new_content: Optional[str] = None
-    expected_original: Optional[str] = None
-
-
-# --------------------------------------------------------------------------
-# SSE helpers (shared contract with the frontend client)
-# --------------------------------------------------------------------------
-def _sse(event: str, data: dict) -> str:
-    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
-
-
-def _stream_tokens(event_name: str, chunks: Iterator[str], *, final: Optional[dict] = None):
-    def gen() -> Iterator[str]:
-        try:
-            for chunk in chunks:
-                if chunk:
-                    yield _sse(event_name, {"text": chunk})
-            if final is not None:
-                yield _sse("meta", final)
-            yield _sse("done", {})
-        except Exception as exc:  # surface backend errors to the client
-            yield _sse("error", {"message": str(exc)})
-
-    return StreamingResponse(gen(), media_type="text/event-stream")
-
-
-# --------------------------------------------------------------------------
-# App factory
-# --------------------------------------------------------------------------
-def create_app(settings: Optional[Settings] = None) -> "FastAPI":
+def create_app(settings: Optional[Settings] = None) -> FastAPI:
     settings = settings or get_settings()
-    workspace = Workspace(settings.resolved_workspace_root())
-    indexer = RagIndexer(
-        workspace,
-        embed_dim=settings.rag_embed_dim,
-        chunk_lines=settings.rag_chunk_lines,
-        chunk_overlap=settings.rag_chunk_overlap,
-        use_sentence_transformers=settings.rag_use_sentence_transformers,
-    )
+    configure_logging(json_logs=settings.log_json, level=settings.log_level)
 
-    app = FastAPI(title="aiforge-editor", version="0.1.0")
+    app = FastAPI(
+        title="aiforge-editor",
+        version="0.2.0",
+        description="AI-native code editor backend: completion, RAG chat, agentic edits.",
+        lifespan=_lifespan,
+    )
+    app.state.settings = settings
+    app.state.services = Services(settings)
+    app.state.ready = False
+
+    # -- middleware (order matters: outermost first) ---------------------
+    app.add_middleware(RequestContextMiddleware)
+    app.add_middleware(BodySizeLimitMiddleware, max_bytes=settings.max_request_bytes)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origin_list() or ["*"],
+        allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["X-Request-ID"],
     )
 
-    # Stash shared state for handlers and tests.
-    app.state.settings = settings
-    app.state.workspace = workspace
-    app.state.indexer = indexer
+    # -- routers ---------------------------------------------------------
+    app.include_router(auth.router)
+    app.include_router(workspaces.router)
+    app.include_router(workspaces.keys_router)
+    app.include_router(files.router)
+    app.include_router(rag.router)
+    app.include_router(ai.router)
 
-    def backend_for(feature: str):
-        return get_backend(settings.backend, model=settings.model_for(feature))
+    # -- error handlers --------------------------------------------------
+    @app.exception_handler(WorkspaceError)
+    async def _workspace_error(_request: Request, exc: WorkspaceError):
+        return JSONResponse({"detail": str(exc)}, status_code=400)
 
-    # -- health ----------------------------------------------------------
-    @app.get("/health")
+    @app.exception_handler(Exception)
+    async def _unhandled(_request: Request, exc: Exception):
+        log.error("internal_error", error=str(exc), type=type(exc).__name__)
+        return JSONResponse({"detail": "internal server error"}, status_code=500)
+
+    # -- health / readiness / metrics ------------------------------------
+    @app.get("/health", tags=["ops"])
     def health() -> dict:
-        return {
-            "status": "ok",
-            "backend": settings.backend,
-            "workspace": str(workspace.root),
-            "indexed_files": indexer.file_count,
-            "indexed_chunks": indexer.chunk_count,
-        }
+        return {"status": "ok", "backend": settings.backend, "version": app.version}
 
-    # -- workspace -------------------------------------------------------
-    @app.get("/api/tree")
-    def tree(path: str = Query("")) -> dict:
+    @app.get("/ready", tags=["ops"])
+    def ready() -> Response:
+        # Ready means: lifespan finished AND the DB answers.
+        ok = bool(getattr(app.state, "ready", False))
+        db_ok = True
         try:
-            return workspace.tree(path).to_dict()
-        except NotFoundError:
-            raise HTTPException(status_code=404, detail="path not found")
-        except PathTraversalError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
+            with get_engine().connect() as conn:
+                conn.execute(text("SELECT 1"))
+        except Exception:
+            db_ok = False
+        status_code = 200 if (ok and db_ok) else 503
+        return JSONResponse({"ready": ok and db_ok, "db": db_ok}, status_code=status_code)
 
-    @app.get("/api/file")
-    def read_file(path: str = Query(...)) -> dict:
-        try:
-            return {"path": path, "content": workspace.read(path)}
-        except NotFoundError:
-            raise HTTPException(status_code=404, detail="file not found")
-        except PathTraversalError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-
-    @app.put("/api/file")
-    def save_file(body: FileSave) -> dict:
-        try:
-            workspace.write(body.path, body.content)
-            return {"path": body.path, "saved": True}
-        except PathTraversalError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-
-    @app.post("/api/file")
-    def create_file(body: FileCreate) -> dict:
-        try:
-            workspace.create(body.path, body.content)
-            return {"path": body.path, "created": True}
-        except PathTraversalError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-        except WorkspaceError as exc:
-            raise HTTPException(status_code=409, detail=str(exc))
-
-    @app.delete("/api/file")
-    def delete_file(path: str = Query(...)) -> dict:
-        try:
-            workspace.delete(path)
-            return {"path": path, "deleted": True}
-        except NotFoundError:
-            raise HTTPException(status_code=404, detail="file not found")
-        except PathTraversalError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-        except WorkspaceError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-
-    # -- RAG -------------------------------------------------------------
-    @app.post("/api/index")
-    def build_index() -> dict:
-        return indexer.build()
-
-    @app.get("/api/search")
-    def search(q: str = Query(...), k: int = Query(6)) -> dict:
-        results = indexer.search(q, k=k)
-        return {"query": q, "results": [r.to_dict() for r in results]}
-
-    # -- AI: completion (SSE) -------------------------------------------
-    @app.post("/api/complete")
-    def complete(body: CompleteRequest):
-        backend = backend_for("complete")
-        chunks = completion_feature.complete(
-            backend,
-            prefix=body.prefix,
-            suffix=body.suffix,
-            language=body.language,
-            path=body.path,
-            max_tokens=body.max_tokens,
-            model=settings.model_for("complete"),
-        )
-        return _stream_tokens("token", chunks)
-
-    # -- AI: chat (SSE) --------------------------------------------------
-    @app.post("/api/chat")
-    def chat(body: ChatRequest):
-        backend = backend_for("chat")
-        stream, results = chat_feature.chat(
-            backend,
-            indexer,
-            question=body.question,
-            open_path=body.open_path,
-            open_content=body.open_content,
-            history=[(t.role, t.content) for t in body.history],
-            top_k=body.top_k,
-            model=settings.model_for("chat"),
-        )
-        return _stream_tokens(
-            "token",
-            stream,
-            final={"references": [r.to_dict() for r in results]},
+    @app.get("/metrics", tags=["ops"])
+    def prometheus_metrics() -> Response:
+        return PlainTextResponse(
+            content=metrics.render_metrics(),
+            media_type=metrics.METRICS_CONTENT_TYPE,
         )
 
-    # -- AI: edit propose ------------------------------------------------
-    @app.post("/api/edit")
-    def edit(body: EditRequest):
-        backend = backend_for("edit")
-        try:
-            proposal = propose_edit(
-                backend,
-                workspace,
-                path=body.path,
-                instruction=body.instruction,
-                model=settings.model_for("edit"),
-            )
-        except PathTraversalError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-        return JSONResponse(proposal.to_dict())
-
-    # -- AI: edit apply --------------------------------------------------
-    @app.post("/api/edit/apply")
-    def edit_apply(body: EditApplyRequest):
-        try:
-            if body.new_content is not None:
-                result = apply_full_content(
-                    workspace, path=body.path, new_content=body.new_content
-                )
-            elif body.diff is not None:
-                result = apply_edit(
-                    workspace,
-                    path=body.path,
-                    diff=body.diff,
-                    expected_original=body.expected_original,
-                )
-            else:
-                raise HTTPException(
-                    status_code=400, detail="provide either 'diff' or 'new_content'"
-                )
-        except PathTraversalError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-        except DiffError as exc:
-            raise HTTPException(status_code=422, detail=str(exc))
-        return JSONResponse(result.to_dict())
-
-    # -- production: serve the built frontend ---------------------------
     _maybe_mount_frontend(app, settings)
-
     return app
 
 
-def _maybe_mount_frontend(app: "FastAPI", settings: Settings) -> None:
+def _maybe_mount_frontend(app: FastAPI, settings: Settings) -> None:
     """Serve the built SPA from ``/`` when AIFORGE_FRONTEND_DIST is set."""
-    dist = settings.frontend_dist
-    if not dist:
-        return
     import os
 
-    if not os.path.isdir(dist):
+    dist = settings.frontend_dist
+    if not dist or not os.path.isdir(dist):
         return
     from fastapi.staticfiles import StaticFiles
 
@@ -315,9 +133,9 @@ def _maybe_mount_frontend(app: "FastAPI", settings: Settings) -> None:
 
 # Module-level app for ``uvicorn aiforge.api.server:app``.
 app = None
-try:  # Construct eagerly so `uvicorn ...:app` works; tolerate import-time issues.
+try:  # Construct eagerly so the ASGI string target works.
     app = create_app()
-except Exception:  # pragma: no cover - defensive; create_app called in tests too
+except Exception:  # pragma: no cover - defensive
     app = None
 
 

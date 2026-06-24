@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { _internals, type SSEHandlers } from "../api/client";
 
-const { parseSSEChunk, dispatch } = _internals;
+const { parseSSEChunk, dispatchSSE: dispatch } = _internals;
 
 describe("SSE parser", () => {
   it("parses complete events and returns the trailing partial as rest", () => {
@@ -42,5 +42,11 @@ describe("SSE parser", () => {
       dispatch({ event: "token", data: "not json" }, { onToken }),
     ).not.toThrow();
     expect(onToken).toHaveBeenCalledWith("");
+  });
+
+  it("dispatches heartbeat events", () => {
+    const onHeartbeat = vi.fn();
+    dispatch({ event: "heartbeat", data: '{"t":123}' }, { onHeartbeat });
+    expect(onHeartbeat).toHaveBeenCalledTimes(1);
   });
 });

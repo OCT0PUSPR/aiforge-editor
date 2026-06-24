@@ -1,0 +1,34 @@
+backend:
+  image:
+    repository: aiforge-backend
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicas: 2
+  resources:
+    requests: { cpu: 250m, memory: 256Mi }
+    limits: { cpu: "1", memory: 1Gi }
+  env:
+    AIFORGE_BACKEND: mock
+    AIFORGE_REDIS_URL: redis://aiforge-redis:6379/0
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 8
+    targetCPUUtilizationPercentage: 70
+
+frontend:
+  image:
+    repository: aiforge-frontend
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicas: 2
+
+# Secrets — supply via --set or a sealed secret; do NOT commit real values.
+secrets:
+  databaseUrl: "postgresql+psycopg://aiforge:aiforge@aiforge-postgres:5432/aiforge"
+  jwtSecret: "REPLACE_WITH_openssl_rand_hex_32"
+  anthropicApiKey: ""
+
+ingress:
+  enabled: true
+  host: aiforge.local

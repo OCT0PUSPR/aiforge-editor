@@ -463,3 +463,264 @@ kbd {
 .btn-secondary {
   background: var(--panel-2);
 }
+
+/* ---- login / loading ---- */
+.loading-screen,
+.login-screen {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  background: radial-gradient(circle at 50% 30%, #161b22, #0d1117);
+}
+.loading-logo,
+.login-logo {
+  font-size: 28px;
+  font-weight: 700;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.login-card {
+  width: 360px;
+  max-width: 90vw;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 28px;
+  box-shadow: 0 20px 60px #0009;
+}
+.login-sub {
+  color: var(--text-dim);
+  font-size: 12px;
+  text-align: center;
+  margin-bottom: 6px;
+}
+.login-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.login-tabs button {
+  flex: 1;
+}
+.login-tabs button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.login-card input {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 9px 11px;
+  font-family: inherit;
+  font-size: 13px;
+}
+.login-submit {
+  margin-top: 4px;
+}
+.login-error {
+  color: var(--danger);
+  font-size: 12px;
+}
+.login-hint {
+  color: var(--text-dim);
+  font-size: 11px;
+  text-align: center;
+  margin-top: 4px;
+}
+
+/* ---- top bar additions ---- */
+.ws-switcher {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 16px;
+}
+.ws-switcher select {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 3px 8px;
+  font-family: inherit;
+}
+.ws-add,
+.ws-create button {
+  padding: 2px 8px;
+}
+.ws-create {
+  display: inline-flex;
+  gap: 4px;
+}
+.ws-create input {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 3px 8px;
+}
+.topbar-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.user-name {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+/* ---- file tree row actions ---- */
+.tree-actions {
+  display: none;
+  margin-left: auto;
+  gap: 2px;
+}
+.tree-row:hover .tree-actions {
+  display: inline-flex;
+}
+.tree-actions button {
+  padding: 0 4px;
+  font-size: 11px;
+  background: transparent;
+  border: none;
+}
+
+/* ---- command palette ---- */
+.palette {
+  width: 560px;
+  max-width: 90vw;
+  background: var(--panel);
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 18px 50px #0008;
+}
+.palette-input {
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 14px;
+  padding: 12px 14px;
+  outline: none;
+}
+.palette-list {
+  max-height: 320px;
+  overflow: auto;
+}
+.palette-item {
+  padding: 8px 14px;
+  cursor: pointer;
+}
+.palette-item:hover {
+  background: var(--panel-2);
+}
+.palette-empty {
+  padding: 12px 14px;
+  color: var(--text-dim);
+}
+
+/* ---- command bar multi toggle ---- */
+.cmd-multi {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-dim);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* ---- settings modal ---- */
+.settings-modal {
+  width: 520px;
+  max-width: 92vw;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.modal-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.settings-body {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.setting-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.settings-info {
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.5;
+  border-top: 1px dashed var(--border);
+  padding-top: 12px;
+}
+.settings-stat {
+  margin-top: 8px;
+  color: var(--accent);
+}
+
+/* ---- toasts ---- */
+.toasts {
+  position: fixed;
+  bottom: 36px;
+  right: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 80;
+}
+.toast {
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 12px;
+  cursor: pointer;
+  box-shadow: 0 8px 24px #0007;
+  max-width: 360px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+}
+.toast-success {
+  border-color: var(--add-text);
+}
+.toast-error {
+  border-color: var(--danger);
+}
+.toast-info {
+  border-color: var(--accent);
+}

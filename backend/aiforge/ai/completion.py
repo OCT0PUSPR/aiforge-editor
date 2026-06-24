@@ -5,6 +5,7 @@ fill-in-the-middle prompt and stream a completion from the active backend. The
 prompt is shaped so :class:`MockLLM` recognises it offline, and so a real model
 returns only the text to insert at the cursor (no surrounding code).
 """
+
 from __future__ import annotations
 
 from typing import Iterator, Optional
@@ -43,7 +44,9 @@ def complete(
     """Stream a fill-in-the-middle completion for the cursor position."""
     request = CompletionRequest(
         system=_SYSTEM,
-        messages=[Message(role="user", content=build_prompt(prefix, suffix, language=language, path=path))],
+        messages=[
+            Message(role="user", content=build_prompt(prefix, suffix, language=language, path=path))
+        ],
         max_tokens=max_tokens,
         stop=None,
         model=model,

@@ -1,4 +1,5 @@
-"""Codebase RAG: chunking, hashing embeddings, cosine store, and search."""
+"""Codebase RAG: chunking, embeddings, cosine store, and search."""
+
 from .indexer import (
     Chunk,
     CosineStore,
@@ -6,6 +7,7 @@ from .indexer import (
     RagIndexer,
     SearchResult,
     chunk_code,
+    get_embedder,
 )
 
 __all__ = [
@@ -15,4 +17,5 @@ __all__ = [
     "RagIndexer",
     "SearchResult",
     "chunk_code",
+    "get_embedder",
 ]

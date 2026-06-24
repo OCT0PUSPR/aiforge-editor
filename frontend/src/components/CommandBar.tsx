@@ -1,25 +1,27 @@
 /**
- * Cmd/Ctrl+K command bar for issuing an agentic edit instruction against the
- * active file. On submit it calls `/api/edit`, then opens the DiffModal with the
- * proposed change for accept/reject.
+ * Cmd/Ctrl+K agentic-edit bar. Issues an instruction against the active file
+ * (or, in multi-file mode, all open files), calls the workspace AI endpoint,
+ * and opens the DiffModal with the proposed change for accept/reject.
  */
 import { useEffect, useRef, useState } from "react";
-import { proposeEdit } from "../api/client";
+import { ai } from "../api/client";
 import { useStore } from "../store";
 
 export function CommandBar() {
   const [open, setOpen] = useState(false);
   const [instruction, setInstruction] = useState("");
+  const [multi, setMulti] = useState(false);
   const [busy, setBusy] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const activeTab = useStore((s) => s.activeTab());
+  const tabs = useStore((s) => s.tabs);
+  const workspace = useStore((s) => s.activeWorkspace);
   const setDiffPreview = useStore((s) => s.setDiffPreview);
-  const setStatus = useStore((s) => s.setStatus);
+  const toast = useStore((s) => s.toast);
 
-  // Global Cmd/Ctrl+K toggles the bar.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setOpen((o) => !o);
       } else if (e.key === "Escape") {
@@ -35,36 +37,55 @@ export function CommandBar() {
   }, [open]);
 
   const submit = async () => {
-    if (!activeTab) {
-      setStatus("open a file before running an AI edit");
-      setOpen(false);
-      return;
-    }
+    if (!workspace) return;
     const text = instruction.trim();
     if (!text) return;
     setBusy(true);
-    setStatus(`proposing edit: ${text}`);
     try {
-      const proposal = await proposeEdit(activeTab.path, text);
-      setDiffPreview({
-        path: proposal.path,
-        diff: proposal.diff,
-        newContent: proposal.new_content,
-        original: activeTab.saved,
-        instruction: text,
-      });
-      setStatus(proposal.changed ? "review the proposed edit" : "no changes proposed");
+      if (multi) {
+        const paths = tabs.map((t) => t.path);
+        if (paths.length === 0) {
+          toast("error", "Open files before a multi-file edit");
+          setBusy(false);
+          return;
+        }
+        const proposal = await ai(workspace.id).proposeMulti(paths, text);
+        setDiffPreview({
+          paths,
+          diff: proposal.diff,
+          files: proposal.files.filter((f) => f.changed),
+          original: "",
+          instruction: text,
+          multifile: true,
+        });
+        toast(proposal.changed ? "info" : "error", proposal.changed ? "Review the edit" : "No changes proposed");
+      } else {
+        if (!activeTab) {
+          toast("error", "Open a file before running an AI edit");
+          setBusy(false);
+          return;
+        }
+        const proposal = await ai(workspace.id).propose(activeTab.path, text);
+        setDiffPreview({
+          paths: [proposal.path],
+          diff: proposal.diff,
+          newContent: proposal.new_content,
+          original: activeTab.saved,
+          instruction: text,
+          multifile: false,
+        });
+        toast(proposal.changed ? "info" : "error", proposal.changed ? "Review the edit" : "No changes proposed");
+      }
       setOpen(false);
       setInstruction("");
     } catch (e) {
-      setStatus(`error: ${(e as Error).message}`);
+      toast("error", `Edit failed: ${(e as Error).message}`);
     } finally {
       setBusy(false);
     }
   };
 
   if (!open) return null;
-
   return (
     <div className="cmd-overlay" onClick={() => setOpen(false)}>
       <div className="cmd-bar" onClick={(e) => e.stopPropagation()}>
@@ -73,7 +94,11 @@ export function CommandBar() {
           ref={inputRef}
           value={instruction}
           placeholder={
-            activeTab ? `Instruct an edit to ${activeTab.path.split("/").pop()}…` : "Open a file first"
+            multi
+              ? `Instruct an edit across ${tabs.length} open file(s)…`
+              : activeTab
+                ? `Instruct an edit to ${activeTab.path.split("/").pop()}…`
+                : "Open a file first"
           }
           onChange={(e) => setInstruction(e.target.value)}
           onKeyDown={(e) => {
@@ -81,6 +106,10 @@ export function CommandBar() {
           }}
           disabled={busy}
         />
+        <label className="cmd-multi" title="Edit all open files">
+          <input type="checkbox" checked={multi} onChange={(e) => setMulti(e.target.checked)} />
+          multi
+        </label>
         <button onClick={() => void submit()} disabled={busy}>
           {busy ? "…" : "Propose"}
         </button>

@@ -10,6 +10,7 @@ iterator of strings, so a one-element stream is valid.
 
 ``httpx`` is imported lazily so the app and offline tests load without it.
 """
+
 from __future__ import annotations
 
 import os
@@ -57,9 +58,7 @@ class HuggingFaceBackend:
                 "The 'httpx' package is required for the HuggingFace backend."
             ) from exc
         if not self._token:
-            raise RuntimeError(
-                "HF_TOKEN is not set. Export it or use AIFORGE_BACKEND=mock."
-            )
+            raise RuntimeError("HF_TOKEN is not set. Export it or use AIFORGE_BACKEND=mock.")
 
         prompt = _render_prompt(request)
         headers = {"Authorization": f"Bearer {self._token}"}

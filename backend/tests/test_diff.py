@@ -1,4 +1,5 @@
 """Unified-diff parser/applier round-trip and edge-case tests."""
+
 import pytest
 
 from aiforge.ai.diff import (
@@ -11,14 +12,7 @@ from aiforge.ai.diff import (
 
 
 def test_parse_simple_diff():
-    diff = (
-        "--- a/foo.py\n"
-        "+++ b/foo.py\n"
-        "@@ -1,2 +1,2 @@\n"
-        "-old line\n"
-        "+new line\n"
-        " unchanged\n"
-    )
+    diff = "--- a/foo.py\n+++ b/foo.py\n@@ -1,2 +1,2 @@\n-old line\n+new line\n unchanged\n"
     patches = parse_unified_diff(diff)
     assert len(patches) == 1
     assert patches[0].target_path() == "foo.py"
@@ -27,43 +21,21 @@ def test_parse_simple_diff():
 
 def test_apply_replaces_line():
     original = "old line\nunchanged\n"
-    diff = (
-        "--- a/foo.py\n"
-        "+++ b/foo.py\n"
-        "@@ -1,2 +1,2 @@\n"
-        "-old line\n"
-        "+new line\n"
-        " unchanged\n"
-    )
+    diff = "--- a/foo.py\n+++ b/foo.py\n@@ -1,2 +1,2 @@\n-old line\n+new line\n unchanged\n"
     result = apply_unified_diff(original, diff)
     assert result == "new line\nunchanged\n"
 
 
 def test_apply_insertion():
     original = "line1\nline2\nline3\n"
-    diff = (
-        "--- a/f.txt\n"
-        "+++ b/f.txt\n"
-        "@@ -1,3 +1,4 @@\n"
-        " line1\n"
-        "+inserted\n"
-        " line2\n"
-        " line3\n"
-    )
+    diff = "--- a/f.txt\n+++ b/f.txt\n@@ -1,3 +1,4 @@\n line1\n+inserted\n line2\n line3\n"
     result = apply_unified_diff(original, diff)
     assert result == "line1\ninserted\nline2\nline3\n"
 
 
 def test_apply_deletion():
     original = "keep1\ndrop\nkeep2\n"
-    diff = (
-        "--- a/f.txt\n"
-        "+++ b/f.txt\n"
-        "@@ -1,3 +1,2 @@\n"
-        " keep1\n"
-        "-drop\n"
-        " keep2\n"
-    )
+    diff = "--- a/f.txt\n+++ b/f.txt\n@@ -1,3 +1,2 @@\n keep1\n-drop\n keep2\n"
     result = apply_unified_diff(original, diff)
     assert result == "keep1\nkeep2\n"
 
@@ -99,13 +71,7 @@ def test_multi_hunk_diff():
 
 
 def test_file_creation_diff():
-    diff = (
-        "--- /dev/null\n"
-        "+++ b/new.py\n"
-        "@@ -0,0 +1,2 @@\n"
-        "+print('hello')\n"
-        "+print('world')\n"
-    )
+    diff = "--- /dev/null\n+++ b/new.py\n@@ -0,0 +1,2 @@\n+print('hello')\n+print('world')\n"
     patches = parse_unified_diff(diff)
     assert patches[0].is_creation
     result = apply_unified_diff("", diff)
@@ -127,12 +93,7 @@ def test_fuzzy_relocate_tolerates_offset():
 def test_mismatched_context_raises():
     original = "completely\ndifferent\ncontent\n"
     diff = (
-        "--- a/f.txt\n"
-        "+++ b/f.txt\n"
-        "@@ -1,2 +1,2 @@\n"
-        "-expected line\n"
-        "+replacement\n"
-        " also expected\n"
+        "--- a/f.txt\n+++ b/f.txt\n@@ -1,2 +1,2 @@\n-expected line\n+replacement\n also expected\n"
     )
     with pytest.raises(DiffError):
         apply_unified_diff(original, diff)

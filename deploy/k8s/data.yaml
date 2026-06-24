@@ -1,0 +1,71 @@
+# Stateful dependencies for a self-contained cluster deploy. In production you
+# would typically use a managed Postgres/Redis instead.
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: aiforge-secrets
+type: Opaque
+stringData:
+  # Replace these in production (e.g. with sealed-secrets / external-secrets).
+  database-url: "postgresql+psycopg://aiforge:aiforge@aiforge-postgres:5432/aiforge"
+  jwt-secret: "REPLACE_WITH_openssl_rand_hex_32"
+  # anthropic-api-key: "sk-ant-..."   # optional
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: aiforge-postgres
+spec:
+  serviceName: aiforge-postgres
+  replicas: 1
+  selector: { matchLabels: { app: aiforge, component: postgres } }
+  template:
+    metadata: { labels: { app: aiforge, component: postgres } }
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          env:
+            - { name: POSTGRES_USER, value: aiforge }
+            - { name: POSTGRES_PASSWORD, value: aiforge }
+            - { name: POSTGRES_DB, value: aiforge }
+          ports: [{ containerPort: 5432 }]
+          volumeMounts:
+            - { name: pgdata, mountPath: /var/lib/postgresql/data }
+  volumeClaimTemplates:
+    - metadata: { name: pgdata }
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources: { requests: { storage: 5Gi } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: aiforge-postgres
+spec:
+  selector: { app: aiforge, component: postgres }
+  ports: [{ port: 5432, targetPort: 5432 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aiforge-redis
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: aiforge, component: redis } }
+  template:
+    metadata: { labels: { app: aiforge, component: redis } }
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          ports: [{ containerPort: 6379 }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: aiforge-redis
+spec:
+  selector: { app: aiforge, component: redis }
+  ports: [{ port: 6379, targetPort: 6379 }]

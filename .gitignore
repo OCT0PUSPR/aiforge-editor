@@ -22,6 +22,31 @@ dist/
 # Editor runtime data
 .aiforge/
 
+# Runtime data (sqlite db, workspaces, RAG persistence)
+backend/data/
+backend/workspace/
+
+# ML training artifacts. The 17M-param proof checkpoint is ~70MB (> 25MB), so
+# the weights (*.pt, *.onnx) are NOT committed -- reproduce them with
+# `python -m aiforge.ml.train --out runs/proof` (see backend/aiforge/ml/README).
+# The small tokenizer/config/training-log ARE committed for reference.
+backend/runs/**/*.pt
+backend/runs/**/*.onnx
+backend/runs/**/corpus/
+backend/runs/stack-*/
+coverage.xml
+.coverage
+
 # Logs / OS
 *.log
+# ...but keep the proof training log as committed evidence (it's tiny).
+!backend/runs/proof/train.log
 .DS_Store
+*.db
+*.sqlite
+*.sqlite3
+*.onnx
+*.pt
+*.pth
+backend/runs/*/ckpt*
+**/__pycache__/

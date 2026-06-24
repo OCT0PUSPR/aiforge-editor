@@ -1,16 +1,18 @@
-/** Bottom status bar: workspace status, index stats, and active file/dirty state. */
+/** Bottom status bar: workspace, index stats, active file/dirty, keybindings. */
 import { useStore } from "../store";
 
 export function StatusBar() {
-  const status = useStore((s) => s.status);
+  const statusText = useStore((s) => s.statusText);
   const activeTab = useStore((s) => s.activeTab());
   const isDirty = useStore((s) => s.isDirty);
   const indexStats = useStore((s) => s.indexStats);
+  const workspace = useStore((s) => s.activeWorkspace);
 
   return (
     <footer className="status-bar">
-      <span className="status-left">{status}</span>
+      <span className="status-left">{statusText}</span>
       <span className="status-right">
+        {workspace && <span className="status-pill">ws: {workspace.name}</span>}
         {indexStats && (
           <span className="status-pill">
             RAG: {indexStats.files}f / {indexStats.chunks}c ({indexStats.embedder})
@@ -22,7 +24,7 @@ export function StatusBar() {
             {isDirty(activeTab.path) ? " ●" : ""}
           </span>
         )}
-        <span className="status-pill">⌘K edit · ⌘S save</span>
+        <span className="status-pill">⌘K edit · ⌘⇧P palette · ⌘S save</span>
       </span>
     </footer>
   );

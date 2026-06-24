@@ -1,4 +1,5 @@
 """AI feature tests against the offline MockLLM backend."""
+
 from aiforge.ai import chat as chat_feature
 from aiforge.ai import completion as completion_feature
 from aiforge.ai.edit import apply_edit, apply_full_content, propose_edit
@@ -31,9 +32,7 @@ def test_mock_chat_returns_references(workspace_root):
     idx = RagIndexer(ws)
     idx.build()
     backend = MockLLM()
-    stream, results = chat_feature.chat(
-        backend, idx, question="How does password hashing work?"
-    )
+    stream, results = chat_feature.chat(backend, idx, question="How does password hashing work?")
     answer = collect(stream)
     assert answer
     assert results  # RAG retrieved context

@@ -1,10 +1,23 @@
-# Minimal dependencies to run the backend fully OFFLINE (MockLLM) and pass tests.
-# No vendor SDKs, no heavy ML. numpy is optional (pure-python cosine fallback
-# exists) but recommended for speed.
+# Minimal dependencies to run the backend fully OFFLINE (MockLLM) and pass the
+# test suite. No vendor LLM SDKs, no heavy ML (torch is import-guarded).
 fastapi>=0.110
 uvicorn>=0.27
 pydantic>=2.5
 pydantic-settings>=2.1
-httpx>=0.27        # used by Starlette's TestClient
+email-validator>=2.0
+httpx>=0.27          # used by Starlette's TestClient
 numpy>=1.24
+
+# Persistence + security + reliability + observability (core to the app).
+SQLAlchemy>=2.0
+alembic>=1.13
+PyJWT>=2.8
+bcrypt>=4.0
+tenacity>=8.2
+structlog>=24.1
+prometheus-client>=0.20
+
+# Test.
 pytest>=8.0
+pytest-cov>=5.0
+pytest-asyncio>=0.23

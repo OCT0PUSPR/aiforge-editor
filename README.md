@@ -2,15 +2,19 @@
 
 # ✦ aiforge-editor
 
-**An open-source, AI-native code editor.** A VS-Code-like React + Monaco frontend
-talking to a Python/FastAPI backend that provides inline completion, codebase
-chat, and agentic edits over your project — backed by a real codebase RAG index.
+**A production-grade, open-source, AI-native code editor.** A VS-Code-like
+React + Monaco frontend, a Python/FastAPI backend with auth, multi-tenant
+workspaces, and observability, **and a from-scratch PyTorch code-completion
+model** — inline completion, codebase chat, and agentic multi-file edits over a
+real codebase RAG index.
 
 [![CI](https://github.com/OCT0PUSPR/aiforge-editor/actions/workflows/ci.yml/badge.svg)](.github/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-22c55e.svg)](LICENSE)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-3776ab.svg)](backend/pyproject.toml)
 [![React 18](https://img.shields.io/badge/react-18-61dafb.svg)](frontend/package.json)
-[![Backend: Claude](https://img.shields.io/badge/LLM-Claude%20%7C%20HF%20%7C%20Mock-a371f7.svg)](backend/aiforge/llm)
+[![LLM](https://img.shields.io/badge/LLM-Local%20%7C%20Claude%20%7C%20HF%20%7C%20Mock-a371f7.svg)](backend/aiforge/llm)
+[![Model](https://img.shields.io/badge/model-from--scratch%20Transformer-ff6b6b.svg)](backend/aiforge/ml/README.md)
+[![Coverage](https://img.shields.io/badge/coverage-87%25%20core-2ea043.svg)](#testing--quality)
 [![Works offline](https://img.shields.io/badge/works-offline-6ea8fe.svg)](#how-the-ai-features-work)
 
 </div>
@@ -19,15 +23,27 @@ chat, and agentic edits over your project — backed by a real codebase RAG inde
 
 ## Why aiforge
 
-Most "AI editors" are closed boxes. aiforge is a small, readable, fully
-open implementation of the pieces that matter:
+Most "AI editors" are closed boxes. aiforge is a readable, fully open, and
+genuinely production-shaped implementation of the pieces that matter — including
+the model itself:
 
+- **A code-completion Transformer built from scratch in PyTorch** — own
+  attention, RoPE, RMSNorm, SwiGLU, a byte-level BPE tokenizer, and a real
+  fill-in-the-middle (PSM/SPM) training pipeline. It actually trains (on
+  MPS/CUDA/CPU) and serves `/api/complete`. No HuggingFace modeling code.
+- **Multi-tenant**: real users (JWT + API keys), multiple isolated workspaces
+  per user, each sandboxed to its own filesystem root with quotas.
+- **Reliable**: tenacity retries, a circuit breaker, and provider failover
+  (local → Claude → HF → mock), SSE streaming with heartbeats + cancellation.
+- **Observable**: structlog JSON logs with request ids, Prometheus `/metrics`,
+  `/health` + `/ready`.
 - A **real inline completion** path (fill-in-the-middle around the cursor),
   wired into Monaco's inline-suggestion provider.
 - A **codebase chat** that retrieves relevant code via a RAG index and streams
   a grounded answer with clickable source references.
-- An **agentic edit** flow: type an instruction, preview the exact unified
-  diff, accept or reject. The diff is applied by a **genuinely correct,
+- An **agentic edit** flow (single- and multi-file): type an instruction,
+  preview the exact diff, accept or reject. The diff is applied by a **genuinely
+  correct,
   unit-tested unified-diff engine written in pure Python** — not a "trust the
   model to emit perfect diffs" hack.
 - A pluggable LLM layer (**Claude / HuggingFace / Mock**) behind one protocol.
@@ -241,13 +257,80 @@ download, no network), stores vectors in a numpy cosine store, and answers
 `sentence-transformers` embedder is used automatically *if installed* and
 enabled in config.
 
+## The from-scratch code model
+
+`backend/aiforge/ml/` contains a **decoder-only Transformer implemented from
+scratch in PyTorch** — own multi-head causal attention, rotary position
+embeddings (RoPE), RMSNorm, SwiGLU MLP, weight tying, and the generation loop —
+plus a byte-level BPE tokenizer and a **fill-in-the-middle (PSM/SPM)** training
+pipeline. No `transformers` modeling code is used. torch is import-guarded, so
+the API and CI run without it.
+
+```bash
+pip install -r backend/requirements-train.txt
+make train   # python -m aiforge.ml.train --out runs/proof   (~20 min on Apple Silicon)
+make eval    # next-token accuracy + FIM exact-match
+make onnx    # ONNX export + verification vs torch
+```
+
+Then serve it locally for inline completion:
+
+```bash
+export AIFORGE_COMPLETE_BACKEND=local
+export AIFORGE_LOCAL_MODEL_DIR=backend/runs/proof
+```
+
+`/api/complete` and the Monaco inline-completion provider are now powered by your
+own model; chat and edits keep their configured backend (Claude in production).
+
+**Real metrics from the bundled proof run** (17.3M params, ~1M FIM tokens of
+stdlib + repo code, 2000 steps / best at step 750, MPS, ~20 min):
+
+| Metric | Value |
+|---|---|
+| Parameters | 17,306,496 |
+| Vocab (BPE) | 8,192 |
+| Best val loss | 4.70 |
+| Next-token accuracy (held-out) | **28.7%** |
+| FIM exact-match (held-out spans) | 0.0 |
+| FIM non-empty rate | 1.0 |
+| ONNX vs torch max logit diff | 9e-6 (argmax match) |
+
+> **Honest scope.** This proof model is small and trained briefly on a modest
+> corpus to demonstrate the *full, correct pipeline* end-to-end on a laptop. It
+> learns Python's lexical/local structure (28.7% next-token accuracy vs. ~0.01%
+> chance) and emits syntactically plausible code, but it does **not** produce
+> coherent multi-line infill — FIM exact-match on unseen spans is 0.0, and
+> sampling degenerates into repetition. The **architecture and training code are
+> the deliverable**; for production-quality completion use `train_scaleup.py` on
+> a GPU (a larger model on The Stack subset — same architecture), or route
+> completion to Claude / HuggingFace (both wired in). See
+> [`backend/aiforge/ml/README.md`](backend/aiforge/ml/README.md) and the
+> committed training log at `backend/runs/proof/train.log`.
+
+## Production hardening
+
+| Area | What's implemented |
+|---|---|
+| **Auth** | JWT access/refresh + per-workspace API keys; bcrypt passwords; refresh-on-401 |
+| **Multi-tenancy** | Users → multiple isolated workspaces, each sandboxed to its own root with quotas |
+| **Reliability** | tenacity retries · circuit breaker · provider failover · SSE heartbeats + cancellation · graceful shutdown |
+| **State** | SQLAlchemy 2.0 + Alembic (users, workspaces, api_keys, chat_sessions, messages, edit_history, rag_meta); SQLite default, Postgres via env |
+| **Security** | Path-traversal + symlink-escape jail (tested) · rate limiting · CORS allowlist · security headers · body-size caps · bandit + pip-audit |
+| **Observability** | structlog JSON + request ids · Prometheus `/metrics` · OTel spans · `/health` + `/ready` |
+| **Deploy** | Multi-stage non-root backend Dockerfile + HEALTHCHECK · nginx frontend · compose (pg + redis) · K8s manifests · Helm chart · Makefile · pre-commit |
+| **CI** | ruff + format + mypy + pytest (coverage gate) + bandit + pip-audit + Alembic, matrix py3.9/3.11/3.12; frontend tsc + vitest + build; docker buildx |
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) and [SECURITY.md](SECURITY.md).
+
 ## Keybindings
 
 | Keys | Action |
 |---|---|
 | `Cmd/Ctrl` + `S` | Save the active file |
-| `Cmd/Ctrl` + `K` | Open the agentic-edit command bar |
-| `Esc` | Close the command bar / dismiss a modal |
+| `Cmd/Ctrl` + `K` | Open the agentic-edit command bar (toggle `multi` for multi-file) |
+| `Cmd/Ctrl` + `Shift` + `P` | Open the command palette |
+| `Esc` | Close a bar / dismiss a modal |
 | `Enter` (chat) | Send the message (`Shift+Enter` = newline) |
 | Type in editor | Trigger inline AI completion (accept with `Tab`) |
 
@@ -291,46 +374,53 @@ All settings are environment variables prefixed `AIFORGE_` (see
 
 ```
 aiforge-editor/
-├── README.md                 · this file
+├── README.md · ARCHITECTURE.md · SECURITY.md · CONTRIBUTING.md
 ├── LICENSE                   · MIT (2026 OCT0PUSPR)
-├── .gitignore
-├── .env.example
-├── docker-compose.yml
-├── .github/workflows/ci.yml  · backend lint+pytest (offline) · frontend typecheck/build
+├── .gitignore · .env.example · Makefile · .pre-commit-config.yaml
+├── docker-compose.yml        · backend + frontend + postgres + redis
+├── .github/workflows/ci.yml  · ruff+format+mypy+pytest+bandit+pip-audit (py3.9/3.11/3.12) · frontend · docker buildx
+├── deploy/
+│   ├── k8s/                  · backend · frontend · data (pg/redis/secrets) manifests
+│   └── helm/aiforge/         · Helm chart (Chart.yaml · values.yaml · templates)
 ├── backend/
-│   ├── pyproject.toml
-│   ├── requirements.txt · requirements-min.txt
-│   ├── Dockerfile
+│   ├── pyproject.toml · requirements{,-min,-train}.txt · Dockerfile (multi-stage non-root)
+│   ├── alembic.ini · alembic/         · migrations (autogenerated from ORM)
 │   ├── aiforge/
-│   │   ├── config.py             · env-driven settings (pydantic-settings)
-│   │   ├── llm/                  · base protocol + anthropic / hf / mock backends
-│   │   ├── workspace/files.py    · sandboxed FS (path-traversal protection)
-│   │   ├── rag/indexer.py        · chunk · hashing embed · cosine store · search
-│   │   ├── ai/
-│   │   │   ├── completion.py     · fill-in-the-middle
-│   │   │   ├── chat.py           · RAG-grounded chat
-│   │   │   ├── edit.py           · propose / apply agentic edits
-│   │   │   └── diff.py           · unified-diff parse · apply · reverse
-│   │   └── api/server.py         · FastAPI app (REST + SSE)
-│   └── tests/                    · pytest (offline) + sample_project fixture
+│   │   ├── config.py                  · env-driven settings (pydantic-settings)
+│   │   ├── db/                         · SQLAlchemy 2.0 models + session
+│   │   ├── security/                   · bcrypt · JWT · API keys · rate limiting
+│   │   ├── observability/              · structlog · prometheus · OTel
+│   │   ├── llm/                        · protocol · local · anthropic · hf · mock · resilient
+│   │   ├── workspace/                  · sandboxed FS (jail + quotas) · manager
+│   │   ├── rag/indexer.py              · chunk · embed · cosine · incremental + persist
+│   │   ├── ai/                         · completion · chat · edit (single+multi) · diff engine
+│   │   ├── ml/                         · FROM-SCRATCH model: model · tokenizer · fim · train · eval · generate · export_onnx
+│   │   └── api/                        · server · middleware · deps · services · schemas · routers/
+│   ├── runs/proof/                     · trained tokenizer · config · train.log (weights gitignored)
+│   └── tests/                          · pytest (offline) — auth · isolation · diff · rag · ai · ml · security · reliability
 └── frontend/
-    ├── package.json · vite.config.ts · tsconfig*.json · index.html
+    ├── package.json · vite.config.ts · tsconfig*.json · playwright.config.ts
     ├── Dockerfile · nginx.conf
     └── src/
         ├── main.tsx · App.tsx · store.ts · language.ts · styles.css
-        ├── api/client.ts        · typed fetch + SSE helpers
-        ├── components/          · FileTree · EditorPane · ChatPanel · CommandBar · DiffModal · StatusBar
-        └── __tests__/           · vitest (SSE parser)
+        ├── api/client.ts               · typed fetch + JWT + SSE
+        ├── components/                  · Login · TopBar · FileTree · EditorPane · ChatPanel
+        │                                  CommandBar · CommandPalette · DiffModal · Settings · StatusBar · Toasts
+        ├── __tests__/                   · vitest
+        └── e2e/                         · Playwright smoke (guarded)
 ```
 
 ## Roadmap
 
-- [ ] Multi-file agentic edits (whole-change-set diff preview)
+- [x] Multi-file agentic edits (whole-change-set diff preview)
+- [x] Persisted, incremental RAG index (content-hash dedup)
+- [x] From-scratch code-completion model + ONNX serving
+- [x] Auth, multi-tenant workspaces, observability, deploy, CI
 - [ ] Streaming inline completion (render ghost text as tokens arrive)
-- [ ] Persisted RAG index (on-disk cache + incremental re-index on save)
-- [ ] Git integration (stage/commit applied edits, real undo via reverse diffs)
+- [ ] Git integration (stage/commit applied edits)
 - [ ] `@file` / `@symbol` mentions in chat
-- [ ] Embeddings upgrade path (sentence-transformers / external vector DB)
+- [ ] tree-sitter semantic chunking for RAG
+- [ ] Scale-up training run on The Stack (GPU) shipped as a released checkpoint
 - [ ] LSP diagnostics surfaced into chat context
 
 ## License

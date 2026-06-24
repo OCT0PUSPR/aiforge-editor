@@ -1,0 +1,11 @@
+# Training / ML dependencies for the from-scratch code model.
+# NOT required to run the backend API (torch is import-guarded). Install these
+# only to train, evaluate, export, or serve the local model.
+torch>=2.2
+numpy>=1.24
+tokenizers>=0.15      # BPE only (we implement the model ourselves)
+onnx>=1.15            # ONNX export for portable serving
+onnxruntime>=1.17     # ONNX verification / CPU serving
+
+# Optional, for the scale-up run on The Stack subset (GPU):
+# datasets>=2.18      # uncomment to stream The Stack from the Hub
